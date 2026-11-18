@@ -32,6 +32,11 @@ def analyze(data):
     venue_blackouts = data['venue_blackouts']
     if not isinstance(blackouts, dict) or not isinstance(venue_blackouts, dict) or set(blackouts) - set(teams) or set(venue_blackouts) - set(venues):
         raise ValueError('blackout maps contain unknown identities')
+    for mapping in (blackouts, venue_blackouts):
+        for blocked in mapping.values():
+            values = [ident(x) for x in rows(blocked, 100)]
+            if len(values) != len(set(values)) or set(values) - set(dates):
+                raise ValueError('blackout dates must be unique supplied dates')
     rounds = circle_rounds(teams)
     eligible = {}
     for index, matches in enumerate(rounds):
@@ -43,23 +48,23 @@ def analyze(data):
         ]
     assigned = {}
 
-    def search(remaining, used):
-        if not remaining:
-            return True
-        choices = {r: [d for d in eligible[r] if d not in used] for r in remaining}
-        current = min(remaining, key=lambda r: (len(choices[r]), r))
-        if not choices[current]:
-            return False
-        for day in choices[current]:
-            free = [v for v in venues if day not in venue_blackouts.get(v, [])]
-            assigned[current] = (day, free)
-            if search([r for r in remaining if r != current], used | {day}):
+    # Maximum bipartite matching avoids factorial search on impossible inputs.
+    day_round = {}
+
+    def place(current, visited):
+        for day in eligible[current]:
+            if day in visited:
+                continue
+            visited.add(day)
+            if day not in day_round or place(day_round[day], visited):
+                day_round[day] = current
                 return True
-            assigned.pop(current)
         return False
 
-    if not search(list(range(len(rounds))), set()):
+    if not all(place(r, set()) for r in sorted(eligible, key=lambda r: (len(eligible[r]), r))):
         raise ValueError('no feasible placement for every round')
+    for day, index in day_round.items():
+        assigned[index] = (day, [v for v in venues if day not in venue_blackouts.get(v, [])])
     output = []
     for index, matches in enumerate(rounds):
         day, free = assigned[index]

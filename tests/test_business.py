@@ -64,3 +64,16 @@ class FixtureSchedulerTests(unittest.TestCase):
 
     def test_deterministic_order(self):
         self.assertEqual(analyze(fixture()), analyze(fixture()))
+
+    def test_large_impossible_matching_rejected(self):
+        data = {'teams': [str(n) for n in range(40)], 'dates': [str(n) for n in range(38)],
+                'venues': [str(n) for n in range(20)], 'team_blackouts': {}, 'venue_blackouts': {}}
+        with self.assertRaisesRegex(ValueError, 'feasible'):
+            analyze(data)
+
+    def test_blackout_must_be_array_of_declared_dates(self):
+        for value in ('2026-12-01', ['unknown-day'], ['2026-12-01', '2026-12-01']):
+            data = fixture()
+            data['team_blackouts']['A'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                analyze(data)
