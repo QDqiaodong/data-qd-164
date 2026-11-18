@@ -1,0 +1,21 @@
+{
+  "teams": ["A", "B", "C", "D"],
+  "dates": ["d1", "d2", "d3"],
+  "venues": ["X", "Y", "Z"],
+  "team_blackouts": {},
+  "venue_blackouts": {"Y": ["d1"]},
+  "previous": [
+    {"round": 1, "home": "A", "away": "D", "date": "d1", "venue": "X"},
+    {"round": 1, "home": "C", "away": "B", "date": "d1", "venue": "Y"},
+    {"round": 2, "home": "C", "away": "A", "date": "d2", "venue": "X"},
+    {"round": 2, "home": "D", "away": "B", "date": "d2", "venue": "Y"},
+    {"round": 3, "home": "A", "away": "B", "date": "d3", "venue": "X"},
+    {"round": 3, "home": "D", "away": "C", "date": "d3", "venue": "Y"}
+  ],
+  "fixture_venues": [
+    {"round": 1, "home": "A", "away": "D", "venues": ["X"]},
+    {"round": 1, "home": "C", "away": "B", "venues": ["X", "Y"]}
+  ],
+  "locked_rounds": [],
+  "locked_fixtures": []
+}

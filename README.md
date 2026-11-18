@@ -17,6 +17,16 @@ uv pip check --python .venv/bin/python
 
 修改源码后重新安装。样例应生成 `round_count=3` 和 `fixture_count=6`，所有队伍对各出现一次。本仓不共享其他仓环境，不依赖Docker、外部账号或持续服务。
 
+## 最小扰动修复
+
+`fixture-repair`（或 `python -m fixture_scheduler.repair`）读取既有完整赛程及更新后的可用性、逐比赛场馆许可和锁定承诺，输出满足全部约束的最小扰动修复方案。它接受同样的 `--source` 与 `--output`，复用同一受限JSON读取和原子报告发布；业务运行仅用标准库。
+
+```sh
+.venv/bin/fixture-repair --source fixtures/repair_input.json --output run/repair.json
+```
+
+目标按优先级最小化改日期轮数、改场馆场数，最后取按轮号展开的规范下标向量；无解时正常退出0并发布 `feasible=false` 的完整报告。字段与校验细节见 [数据契约](docs/contract.md)。
+
 输入JSON最多8MB，拒绝重复键、非有限数值和未定义字段；源字节SHA256随结果保留。
 输出是可独立读取的JSON；成功后原子替换，输入/计算失败退出2并保留旧报告。
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。

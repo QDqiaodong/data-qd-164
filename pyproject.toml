@@ -9,5 +9,6 @@ requires-python = ">=3.11"
 dependencies = []
 [project.scripts]
 fixture-scheduler = "fixture_scheduler.cli:main"
+fixture-repair = "fixture_scheduler.repair:main"
 [tool.setuptools.packages.find]
 where = ["src"]
