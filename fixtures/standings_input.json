@@ -1,0 +1,16 @@
+{
+  "teams": ["A", "C", "B", "D"],
+  "cutoffs": [7, 8],
+  "results": [
+    {"seq": 1, "round": 2, "home": "B", "away": "A", "status": "played", "home_goals": 0, "away_goals": 1},
+    {"seq": 2, "round": 3, "home": "A", "away": "C", "status": "played", "home_goals": 1, "away_goals": 0},
+    {"seq": 3, "round": 1, "home": "A", "away": "D", "status": "played", "home_goals": 2, "away_goals": 0},
+    {"seq": 4, "round": 1, "home": "B", "away": "C", "status": "played", "home_goals": 1, "away_goals": 0},
+    {"seq": 5, "round": 2, "home": "D", "away": "C", "status": "played", "home_goals": 0, "away_goals": 1},
+    {"seq": 6, "round": 3, "home": "D", "away": "B", "status": "played", "home_goals": 1, "away_goals": 0},
+    {"seq": 8, "round": 1, "home": "B", "away": "C", "status": "void", "home_goals": null, "away_goals": null}
+  ],
+  "rulings": [
+    {"seq": 7, "team": "A", "active": true, "deduction": 6}
+  ]
+}

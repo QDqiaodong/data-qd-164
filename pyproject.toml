@@ -10,5 +10,6 @@ dependencies = []
 [project.scripts]
 fixture-scheduler = "fixture_scheduler.cli:main"
 fixture-repair = "fixture_scheduler.repair:main"
+fixture-standings = "fixture_scheduler.standings:main"
 [tool.setuptools.packages.find]
 where = ["src"]

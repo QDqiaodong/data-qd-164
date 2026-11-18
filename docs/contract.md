@@ -118,3 +118,144 @@ permutations. The integration fixture demonstrates a round whose date has two
 free venues but whose per-fixture permissions leave only one matchable venue,
 forcing a global date move; locking the other two rounds makes it infeasible.
 
+
+# Official-result rulings and tie-broken standings v1
+
+`fixture-standings` and `python -m fixture_scheduler.standings` read one
+self-contained batch of unordered official result revisions and team rulings,
+then settle two knowledge cutoffs. They accept `--source` and `--output` and
+reuse the same strict JSON reader and atomic report writer as the other entry
+points. Business code uses only the Python standard library, keeps no state
+between batches, and never reads dates, venues, previous schedules or locks.
+
+## Wire format
+
+The top-level object has exactly `teams`, `cutoffs`, `results` and `rulings`.
+
+- `teams` holds 2–40 unique identifiers under the shared `common.ident` rule.
+  Its order fixes every `circle_rounds` round number, home/away direction and
+  slot, and is the final tiebreak for the standings.
+- `cutoffs` holds exactly two strictly increasing non-boolean integers in
+  `0..10^9`. A cutoff may fall between existing `seq` values or exceed the
+  largest `seq`.
+- `results` and `rulings` together hold at most 20 000 rows and each may be
+  empty. Every `seq` across both arrays is a non-boolean integer in `1..10^9`,
+  unique across the whole batch. Row order carries no meaning and sequences
+  need not be contiguous.
+- A `results` row has exactly `seq`, `round`, `home`, `away`, `status`,
+  `home_goals`, `away_goals`. `round` is a non-boolean integer starting at 1,
+  and `round`/`home`/`away` must name one directed `circle_rounds` fixture
+  exactly. Reversed home/away, unknown teams, a wrong round and bye pseudo
+  matches are rejected. A fixture may carry several revisions with different
+  `seq`. For `status=played` both goals are non-boolean integers in `0..1000`;
+  for `status=void` both goal fields must be `null`; any other status is
+  rejected.
+- A `rulings` row has exactly `seq`, `team`, `active`, `deduction`. `team` must
+  be declared, `active` a real JSON boolean, and `deduction` a non-boolean
+  integer in `0..10^6`. One ruling wholly replaces the team's previous `active`
+  and `deduction`; it is not additive. Without a ruling a team defaults to
+  `active=true` and `deduction=0`.
+- Every record is validated even when its `seq` lies beyond both cutoffs. Each
+  layer rejects missing or unknown fields, invalid types and duplicate `seq`
+  values.
+
+## Settlement
+
+Each cutoff is settled independently from frozen, read-only snapshot views.
+
+- Only records with `seq <= cutoff` are visible. The last visible result per
+  fixture wins; a visible `void` never falls back to an earlier `played`. A
+  fixture without a visible result is unreported (`pending`).
+- The last visible ruling per team wins. A withdrawn team is excluded from the
+  table and every match involving it is void for both sides.
+- A fixture counts only when both sides are active and the selected record is
+  `played`. It adds to both teams: 3/1/0 points, matches played, wins, draws,
+  losses, goals for and goals against.
+- A team's net points are its match points minus its current deduction and may
+  be negative. Deductions never change goals, wins/draws/losses or
+  head-to-head points.
+- Every active team appears, even with no valid match. Both-inactive fixtures
+  are voided once and never counted.
+
+## Ranking
+
+Teams are first grouped by net points. Inside one initial group `G`:
+
+1. Rebuild each member's `(head_points, head_goal_difference, head_goals_for)`
+   from exactly the counted matches whose two sides both lie in `G`, and sort
+   the group by that triple descending (input index only for display before
+   the next step).
+2. Partition the sorted group into maximal blocks with equal triples, keeping
+   block order.
+3. If there is more than one block, recurse into every block of size > 1: take
+   the matches *inside that block only*, rebuild the whole triple from its
+   first component and repeat. Parent values are never continued and only the
+   next triple component is never consulted.
+4. If the group's triples are all identical and no split occurs, finish the
+   group by global goal difference descending, global goals for descending and
+   `teams` input index ascending. That group is not revisited.
+5. A single-team group finishes immediately.
+
+Final ranks are consecutive and unique `1..N` over the teams on the table.
+Head-to-head statistics never cross groups or cutoffs.
+
+## Result
+
+The report publishes `schema_version: 1`, `source_sha256` over the raw input
+bytes, and `result` with exactly `snapshots` and `movements`.
+
+- `snapshots` lists the two cutoffs in order. Each has exactly `cutoff`,
+  `standings`, `withdrawn` and `match_audit`.
+- `standings` is ordered by rank; each row has exactly `team`, `rank`,
+  `played`, `won`, `drawn`, `lost`, `goals_for`, `goals_against`,
+  `goal_difference`, `raw_points`, `deduction` and `points`. `raw_points` is
+  before deduction and `points` is net.
+- `withdrawn` lists the snapshot's inactive teams in `teams` order.
+- `match_audit` covers every circle fixture, ordered by round and original slot,
+  with exactly `round`, `home`, `away`, `selected_seq`, `reason`, `home_goals`
+  and `away_goals`. With no visible result `selected_seq` and both goals are
+  `null` and `reason` is `pending`; otherwise the selected `seq` and original
+  goals are kept and `reason` is `withdrawn` when either side is inactive,
+  `void` when the selected record is void, and `counted` otherwise. A played
+  record excluded by a withdrawal keeps its goals purely for audit and never
+  enters a scoring table.
+- `movements` covers every team in `teams` order with exactly `team`,
+  `before_rank`, `after_rank` and `delta`. A team absent from a table has a
+  `null` rank there, and `delta` is `before_rank - after_rank` only when both
+  ranks exist, otherwise `null`.
+
+Malformed input or IO failure exits 2, explains on stderr and preserves any
+existing report; legal input including empty data or a fully withdrawn field
+exits 0. Successful stdout JSON equals the published file, reruns of the same
+bytes are byte-identical, input and output must differ and the output may not
+be a symlink.
+
+## Implementation note: frozen snapshot views
+
+Both cutoffs are settled from frozen read-only views rather than by streaming
+`seq` forward and undoing old contributions. Each snapshot first selects the
+maximum visible `seq` per fixture and per team, then derives every statistic
+from scratch using only its own selected records. Nothing is mutated in place,
+so a correction replaces both sides of the old result instead of adding to them,
+a withdrawal removes the whole match from both sides, and restoring a team
+replays exactly the results visible at that cutoff without double counting.
+Because the two snapshots never share a working table, a later correction or
+ruling cannot leak into the earlier table.
+
+Ranking likewise rebuilds the head-to-head table from the current block's own
+matches at every recursion level; it never reads a parent block's numbers or
+only the next triple component. Correction is safe because the fixture and
+group memberships are recomputed from the selected records of that same
+snapshot.
+
+## Testing
+
+`tests/test_standings.py` checks the mandated linked example (teams
+`[A, C, B, D]`, cutoffs `[7, 8]`, final tables `[A, B, C, D]` and
+`[A, C, D, B]`), correction/withdrawal/restoration, the pending-versus-void
+distinction, non-boolean integers, invalid future records, input shuffling,
+two-level recursion and fallback metrics. An independent truth implementation
+in the test module re-derives every snapshot with linear scans and a separate
+recursive partition, and is cross-checked on 150 random batches plus 40
+full-slate six-team batches. Boundary tests cover empty data, all-withdrawn,
+two teams, odd team counts with byes and 40 teams.

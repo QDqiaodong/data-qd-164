@@ -27,6 +27,19 @@ uv pip check --python .venv/bin/python
 
 目标按优先级最小化改日期轮数、改场馆场数，最后取按轮号展开的规范下标向量；无解时正常退出0并发布 `feasible=false` 的完整报告。字段与校验细节见 [数据契约](docs/contract.md)。
 
+## 官方赛果裁定与同分积分榜
+
+`fixture-standings`（或 `python -m fixture_scheduler.standings`）读取一个自足的官方赛果修订与队伍裁定批次，按两个知识序号截止点分别结算积分榜、逐场有效性依据和名次变化。它复用同一受限JSON读取与原子报告发布，接受同样的 `--source` 与 `--output`，业务运行仅用标准库，不读取日期、场馆、旧赛程或锁。
+
+```sh
+.venv/bin/fixture-standings --source fixtures/standings_input.json --output run/standings.json
+.venv/bin/fixture-standings --source fixtures/standings_withdrawal_input.json --output run/standings_withdrawal.json
+```
+
+样例 `fixtures/standings_input.json` 取 teams 顺序 `[A, C, B, D]`、cutoffs `[7, 8]`：截止 7 四队同为净3分，小循环递归拆分后榜单为 `[A, B, C, D]`；截止 8 的更正使 B、C 那场作废，榜单变为 `[A, C, D, B]`。`fixtures/standings_withdrawal_input.json` 展示退赛、恢复与扣分。字段、排序定义与实现取舍见 [数据契约](docs/contract.md)。
+
+两份积分榜各自从冻结的可见记录视图独立结算，更正或裁定不会跨截止点或跨同分组残留。
+
 输入JSON最多8MB，拒绝重复键、非有限数值和未定义字段；源字节SHA256随结果保留。
 输出是可独立读取的JSON；成功后原子替换，输入/计算失败退出2并保留旧报告。
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。
