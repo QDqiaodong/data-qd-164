@@ -1,0 +1,11 @@
+{
+  "teams": ["A", "B", "C", "D"],
+  "fixtures": [
+    {"round": 1, "home": "A", "away": "D", "capacity": 1, "unit_price_cents": 1},
+    {"round": 1, "home": "C", "away": "B", "capacity": 1, "unit_price_cents": 1},
+    {"round": 2, "home": "C", "away": "A", "capacity": 50, "unit_price_cents": 100},
+    {"round": 2, "home": "D", "away": "B", "capacity": 50, "unit_price_cents": 100},
+    {"round": 3, "home": "A", "away": "B", "capacity": 50, "unit_price_cents": 100},
+    {"round": 3, "home": "D", "away": "C", "capacity": 50, "unit_price_cents": 100}
+  ]
+}

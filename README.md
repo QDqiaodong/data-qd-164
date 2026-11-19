@@ -40,6 +40,21 @@ uv pip check --python .venv/bin/python
 
 两份积分榜各自从冻结的可见记录视图独立结算，更正或裁定不会跨截止点或跨同分组残留。
 
+## 球票库存与整数退款账本
+
+`fixture-tickets`（或 `python -m fixture_scheduler.tickets`）在独立持久 SQLite 文件中维护球票业务账本：以 `circle_rounds` 的有向比赛身份初始化场次票额与单价，原子接收跨场购买订单和部分退票，并给出可售库存、逐票实付与已收/已退款守恒报表。它复用同一受限 JSON 读取与原子报告发布，仅用标准库（含 `sqlite3`），不接支付、网络或外部数据库，也不读写另外三个入口的数据。
+
+```sh
+fixture-tickets init   --db run/tickets.db --source fixtures/tickets_catalog.json
+fixture-tickets apply  --db run/tickets.db --source fixtures/tickets_batch_b1.json
+fixture-tickets apply  --db run/tickets.db --source fixtures/tickets_batch_b2.json
+fixture-tickets report --db run/tickets.db --output run/tickets_report.json
+```
+
+三个子命令 `init` / `apply` / `report` 也可由测试直接调用 `fixture_scheduler.tickets` 的 `init_ledger`、`apply_batch`、`build_report` / `write_report`。DB 是独立 SQLite 文件，跨进程保留；任何已有文件或符号链接都拒绝覆盖，非法目录不会留下半初始化数据库。
+
+自制样例 `fixtures/tickets_catalog.json` 取四队 circle 赛程，前两场容量均 1、单价均 1 分。`tickets_batch_b1.json` 是契约规定的手算联动样例：订单 O 跨两场各买 1 张并给 1 分优惠，最大余数法把优惠分给票 1，净额为 `[0, 1]`；随后退掉票 1（零实付退票仍释放票额），新订单 P 无优惠买回该场。此时两场 active 均 1、available 均 0，全库 `paid=2, refunded=0, retained=2`。`tickets_batch_b2.json` 再退 O 的票 2，全库变为 `refunded=1, retained=1`，仅第二场 available 为 1；之后重试 B1 只返回原冻结回执，不再扣票收款。字段、整数分摊、幂等与并发语义见 [数据契约](docs/contract.md)。
+
 输入JSON最多8MB，拒绝重复键、非有限数值和未定义字段；源字节SHA256随结果保留。
 输出是可独立读取的JSON；成功后原子替换，输入/计算失败退出2并保留旧报告。
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。

@@ -1,0 +1,11 @@
+{
+  "batch_id": "B2",
+  "operations": [
+    {
+      "kind": "refund",
+      "refund_id": "R2",
+      "order_id": "O",
+      "ticket_nos": [2]
+    }
+  ]
+}

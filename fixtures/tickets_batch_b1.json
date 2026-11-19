@@ -1,0 +1,28 @@
+{
+  "batch_id": "B1",
+  "operations": [
+    {
+      "kind": "buy",
+      "order_id": "O",
+      "discount_cents": 1,
+      "lines": [
+        {"round": 1, "home": "A", "away": "D", "quantity": 1},
+        {"round": 1, "home": "C", "away": "B", "quantity": 1}
+      ]
+    },
+    {
+      "kind": "refund",
+      "refund_id": "R1",
+      "order_id": "O",
+      "ticket_nos": [1]
+    },
+    {
+      "kind": "buy",
+      "order_id": "P",
+      "discount_cents": 0,
+      "lines": [
+        {"round": 1, "home": "A", "away": "D", "quantity": 1}
+      ]
+    }
+  ]
+}

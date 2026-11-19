@@ -259,3 +259,213 @@ in the test module re-derives every snapshot with linear scans and a separate
 recursive partition, and is cross-checked on 150 random batches plus 40
 full-slate six-team batches. Boundary tests cover empty data, all-withdrawn,
 two teams, odd team counts with byes and 40 teams.
+
+
+# Ticket inventory and integer refund ledger v1
+
+`fixture-tickets` and `python -m fixture_scheduler.tickets` manage an
+independent, persistent SQLite ledger file. The three subcommands are
+`init --db DB --source CATALOG`, `apply --db DB --source BATCH` and
+`report --db DB --output REPORT`; the same initialisation, batch execution and
+reporting functions are directly importable from
+`fixture_scheduler.tickets`. The database is a standalone SQLite file that
+survives process restarts; no other entry point's data or fields are touched,
+and only the Python standard library (including `sqlite3`) is used. Tickets are
+business quantities: there are no physical seat numbers, match dates or
+official results.
+
+## Catalogue wire format
+
+The catalogue top level has exactly `teams` and `fixtures`.
+
+- `teams` follows the repository identifier rule: 2-40 unique identifiers whose
+  input order fixes every `circle_rounds` round, directed home/away match and
+  slot.
+- `fixtures` must cover every directed `circle_rounds` match exactly once. Each
+  row has exactly `round`, `home`, `away`, `capacity`, `unit_price_cents`.
+  Round numbers, home and away must match the circle rounds precisely:
+  duplicates, missing matches, reversed home/away, wrong rounds and bye pseudo
+  matches are rejected. `capacity` is a non-boolean integer in `0..10^6` and
+  `unit_price_cents` a non-boolean integer in `1..10^6`; both are immutable
+  after initialisation.
+- Canonical fixture order is round number followed by the original circle slot;
+  team-name string ordering is never used.
+- `init` validates the whole catalogue before creating anything, then creates
+  the ledger with application and schema-version markers. Any existing file or
+  symlink at the database path is refused; an invalid catalogue leaves no
+  half-initialised database, `-wal` or `-shm` file behind.
+
+## Batch wire format and canonical request identity
+
+A batch has exactly `batch_id` and `operations`. `batch_id`, `order_id` and
+`refund_id` follow the identifier rule. `operations` is an ordered array of
+1-1000 items.
+
+- A buy operation has exactly `kind="buy"`, `order_id`, `discount_cents` and
+  `lines`. Each line has exactly `round`, `home`, `away`, `quantity`; the
+  fixture must be declared, a fixture appears at most once per order, and
+  `quantity` is a non-boolean integer in `1..2000`. An order totals at most
+  2000 tickets, `lines` is non-empty and bounded by the fixture count, and a
+  batch issues at most 20000 new tickets. `discount_cents` is a non-boolean
+  integer from zero up to the order's gross total. Every ticket's gross price
+  is the fixture's initialised unit price; all tickets of an order are
+  determined together and partial fills never occur.
+- A refund operation has exactly `kind="refund"`, `refund_id`, `order_id` and
+  `ticket_nos`. `ticket_nos` is a non-empty, duplicate-free array of the
+  order's original ticket numbers, never longer than the original order.
+  Only successfully bought, not-yet-refunded original tickets can be refunded.
+  Negative or non-existent tickets and second refunds are rejected. A batch
+  may refund tickets bought earlier in the same batch and buy again after a
+  refund.
+- `order_id` is permanently unique across the whole database and is not
+  released even after a full refund. `refund_id` is permanently unique in its
+  own namespace, independent of order identifiers. Reusing a business
+  identifier fails unless it is a retry of the identical original batch.
+
+The canonical request text is produced from the parsed batch with
+`json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+allow_nan=False)` and encoded as UTF-8. Object key order and indentation do not
+affect identity, while every array order is preserved and semantic. The
+canonical text and its SHA-256 are stored; retries compare the actual
+canonical text rather than trusting the digest.
+
+## Integer discount allocation
+
+For one order, let ticket `i` have gross `g_i`, total gross
+`G = sum(g_i)` and order discount `D`. Each ticket first receives
+`floor(D * g_i / G)`. The remaining cents are allocated one at a time to the
+tickets with the largest `(D * g_i) mod G` remainder; ties follow canonical
+ticket order. The ticket's `paid_cents = g_i - discount_share`. All arithmetic
+is integer-only: no floating point, banker's rounding or average-price
+substitution exists. `D = 0` and `D = G` are both legal.
+
+The order-level discount is therefore frozen per ticket at purchase time with
+the largest-remainder method, ties broken by canonical ticket order. A partial
+refund returns only the frozen paid amount of the named tickets; the discount
+is never redistributed over the remaining tickets and current average prices
+are never used.
+
+## Ticket expansion and inventory
+
+Tickets of an order are expanded in canonical fixture order first, then by
+quantity sequence inside a fixture, receiving `ticket_no` values 1, 2, 3, ...
+that never change for that order.
+
+Each buy checks the remaining inventory of every named fixture before any
+ticket exists. A refund only releases the named, not-yet-refunded tickets of
+its order. Operations inside one batch execute strictly in order, so a later
+order can use inventory released by an earlier refund; if any operation fails,
+the whole batch rolls back its inventory, money and all business identities.
+A refund simultaneously releases fixture inventory and records the original
+paid refund; a zero-paid ticket still releases its seat. A cross-fixture order
+whose final fixture is sold out leaves no tickets, money or used order number
+on the other fixtures.
+
+Every write performs its capacity checks, facts and batch receipt in one
+database transaction (`BEGIN IMMEDIATE`). Two connections competing for the
+last ticket can have at most one successful issuer; the loser reports
+sold-out or a lock timeout without partial effects. A failure never consumes a
+batch, order or refund identifier.
+
+## Idempotent batches
+
+After a batch commits, its `batch_id` is matched against the stored canonical
+request. The identical request returns the original frozen receipt without
+re-validating current inventory or refund state, even when the tickets have
+since been refunded or the fixture sold out; no extra tickets or charges are
+created. A different request under the same `batch_id` is rejected. Because
+the receipt is committed in the same transaction as the facts, a CLI output
+failure after commit can be recovered by retrying the identical request, which
+returns the stored receipt exactly once; the implementation never claims such
+a failure was rolled back.
+
+## Receipts and report
+
+A successful `apply` prints an envelope whose top level is exactly
+`schema_version: 1` and `result`. The result has exactly `batch_id`,
+`request_sha256` and `receipts`, with receipts in operation order.
+
+- A buy receipt has exactly `kind`, `order_id`, `gross_cents`,
+  `discount_cents`, `paid_cents`, `tickets`. Tickets are ordered by
+  `ticket_no`; each has exactly `ticket_no`, `round`, `home`, `away`,
+  `gross_cents`, `discount_cents`, `paid_cents`.
+- A refund receipt has exactly `kind`, `refund_id`, `order_id`, `ticket_nos`
+  (ascending) and `refunded_cents`, the sum of the named tickets' frozen paid
+  amounts.
+
+The report envelope again has `schema_version: 1` and `result`, with exactly
+`catalog_sha256` (the digest of the original catalogue input bytes),
+`batch_count`, `fixtures`, `orders` and `totals`.
+
+- `fixtures` covers every fixture in canonical order. Each row has exactly
+  `round`, `home`, `away`, `capacity`, `unit_price_cents`, `issued_tickets`,
+  `refunded_tickets`, `active_tickets`, `available_tickets`, where quantities
+  are full-history cumulative or current values,
+  `active = issued - refunded` and `available = capacity - active`.
+- `orders` is sorted by the Python string order of `order_id`. Each row has
+  exactly `order_id`, `gross_cents`, `discount_cents`, `paid_cents`,
+  `refunded_cents`, `retained_cents`, `tickets`. Tickets use the buy receipt
+  fields plus `refund_id`, which is `null` when the ticket is still active.
+- `totals` has exactly `gross_cents`, `discount_cents`, `paid_cents`,
+  `refunded_cents`, `retained_cents`, `active_tickets`. Money totals are sums
+  over orders with `paid = gross - discount` and
+  `retained = paid - refunded`; `active_tickets` equals the sum of per-fixture
+  active values. All money is integer cents. Zero-money refunds still count in
+  `refunded_tickets`. An empty ledger reports complete zero values and an empty
+  `orders` array.
+
+The report's multi-table reads belong to one read snapshot and never mutate
+business state; when state is unchanged, repeated reports are byte-identical.
+`report` reuses `common.save`, so stdout JSON equals the published file, the
+output cannot be a symlink and a failed publication preserves the previous
+report. No clocks or random values appear in any output.
+
+## Files, errors and concurrency
+
+The shared reader keeps the 8 MB limit, duplicate-key rejection and
+non-finite-number rejection; every layer rejects missing or unknown fields and
+wrong types, including future operations that would only fail at execution
+time. `apply` and `report` reject a missing path, a symlink, or a database that
+is not a compatible `fixture-tickets` ledger; they never create or migrate one.
+The source or report target cannot point at the database file.
+
+Business, input, SQLite and file errors exit `2` with a stderr message. A
+failed database transaction preserves the prior business state; a failed report
+publication preserves the old report. No cross-file/SQLite distributed
+transaction and no power-loss file recovery are promised.
+
+## Implementation note: facts versus maintained projections
+
+Two designs satisfy the ledger rules.
+
+- **Maintained per-operation inventory and balances.** Every operation updates
+  per-fixture active counts and per-order money directly. All copies of the
+  state and the batch identity must then be written in one transaction so that
+  a failure cannot leave divergent projections.
+- **Projections from immutable sale/refund facts.** Buy and refund facts are
+  inserted once, sale-to-refund links stay unique, and inventory and money are
+  computed from those facts inside one read snapshot. Later operations in a
+  batch must still observe refunds made by earlier operations.
+
+The chosen implementation combines them deliberately: immutable `orders`,
+`tickets`, `refunds` and `batches` facts are the durable source of truth, while
+per-fixture `active_tickets` and per-order totals are maintained inside the
+same write transaction and are independently re-derived by the report queries.
+Because both representations commit or roll back together and the report uses a
+single snapshot, either design alone would produce the same business result.
+
+## Testing
+
+`tests/test_tickets.py` and `tests/test_tickets_cli.py` cover the
+hand-calculated linked example, a cross-fixture sell-out that rolls the whole
+batch back, refund-then-resell inside one batch, zero-paid refunds,
+largest-remainder ties with equal and unequal prices, split refunds whose
+cumulative total equals the original paid amount, identifier reuse after
+failure, replaying an original buy batch after its tickets were refunded,
+same-identifier conflicts, duplicate refund identifiers, invalid match
+identities, boolean money, invalid future operations, real SQLite write errors,
+post-commit output recovery, JSON key order/whitespace invariance,
+array-permutation conflicts, and last-ticket contention through both real
+SQLite connections and separate operating-system processes. Reports are
+independently checked for ticket and money conservation, and the three
+original entry points keep their full regression suites.
