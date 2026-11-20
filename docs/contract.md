@@ -620,3 +620,128 @@ array-permutation conflicts, and last-ticket contention through both real
 SQLite connections and separate operating-system processes. Reports are
 independently checked for ticket and money conservation, and the three
 original entry points keep their full regression suites.
+
+# 下游日历差量同步 fixture-calendar v1
+
+`fixture-calendar` 和 `python -m fixture_scheduler.calendar` 把已获准发布的完整赛程，
+按订阅端的球队或场馆范围，以新增、改期、换馆与撤下差量的形式同步给各自独立的下游日历
+（例如球队网站与场馆公告）。状态保存在一季一库、独立于票务账本的本地 SQLite 文件中，
+每条命令都是独立进程；业务运行仅用 Python 标准库（含 `sqlite3`），不连接任何外部服务，
+也不读写其他入口的文件。库内带 `application=fixture-calendar` 与
+`schema_version=1` 标记，其他应用或不兼容版本的库一律拒绝，且除 `init` 外不会创建缺失的库。
+
+## 命令与输入
+
+```
+fixture-calendar init      --db DB --source SEASON
+fixture-calendar publish   --db DB --revision N --source REPORT
+fixture-calendar subscribe --db DB --subscriber ID --source SCOPE
+fixture-calendar prepare   --db DB --subscriber ID
+fixture-calendar ack       --db DB --subscriber ID --package ID
+```
+
+所有 `--source` 都经 `common.read` 读取，因此 8 MB 上限、重复 JSON 键拒绝和非有限数值拒绝
+全部适用；标识遵循 `common.ident`，整数按非布尔整数校验。输入文件不得与数据库指向同一文件，
+数据库路径不接受符号链接。业务、输入或 SQLite 错误以退出码 2 与 stderr 说明结束，失败不留下
+部分业务状态：写入命令在 `BEGIN IMMEDIATE` 单事务内先完整校验再落库，任何错误都回滚。
+
+### init：赛季声明
+
+`SEASON` 顶层恰含 `teams` 与 `venues`：`teams` 为 2–40 个、`venues` 为 1–40 个无重复标识。
+球队顺序直接决定 `model.circle_rounds` 生成的全部有向 `(round, home, away)` 比赛键，也是之后
+发布校验的唯一身份来源。日期在本应用中始终是不透明标识，不做任何历法换算。已有文件、目录或
+符号链接一律拒绝覆盖；非法输入会删除半成品库及 `-wal`/`-shm` 残留。
+
+### publish：官方修订
+
+`REPORT` 必须是项目既有的 `schema_version=1` 信封（顶层恰含 `schema_version`、
+`source_sha256`、`result`），接受两种 `result` 形状：
+
+- 生成器：恰含 `round_count`、`fixture_count`、`fixtures`；两个计数必须分别等于该赛季
+  `circle_rounds` 的轮数与有向比赛总数，且与实际行数一致；
+- 修复器：恰含 `feasible`、`objective`、`assignment_vector`、`fixtures`；只有
+  `feasible=true` 可发布，`feasible=false` 整份拒绝。
+
+其他结果形状、非整数 1 的 `schema_version`、空 `source_sha256` 均拒绝。每个比赛行恰含
+`round`、`home`、`away`、`date`、`venue` 五字段，且必须满足：
+
+- 行集合与该赛季全部有向 circle 比赛键完全相等：缺场、重复、额外场次、颠倒主客、错误轮号、
+  未知球队、bye 伪比赛一律拒绝；场馆必须是赛季已声明场馆；
+- 同一轮所有行共用一个日期、同轮场馆不重复，轮与轮之间日期互异；报告行序无语义，校验后按
+  `(round, home, away)` 规范序存储。
+
+这里只核可发布结构，不会从源排程约束重求可行性，也不计算修复代价。修订号是 1..10^9 的非布尔
+整数，首次必须为 1，此后必须恰好等于当前号加 1；任何拒绝都不推进修订号，随后正确的下一修订
+仍可发布。发布是整体替换：新修订写入一份全新的完整 `official_fixtures` 快照，旧修订原样保留。
+
+### subscribe：订阅范围
+
+`SCOPE` 顶层恰含 `teams` 与 `venues`，两者都是无重复的赛季已声明标识数组，均允许为空。
+比赛只要任一参赛队在 `teams` 中、或当前场馆在 `venues` 中即进入该端视图，两个条件同时命中
+仍只保留一行；两组皆空表示该端视图为空。命令用于新增订阅端或替换其当前范围；范围变更不触及
+该端的确认视图、最近确认包标识或待确认包。
+
+## 端点、差量与包生命周期
+
+- 旧端点是该端**最近一次已确认包的完整目标视图**（首次确认前为空），随确认事实持久化，
+  永远不用当前订阅范围重算。
+- 新端点是当前官方修订按当前订阅范围筛出的视图。
+- 比较按有向比赛键 `(round, home, away)`：新有旧无、或日期/场馆变化的比赛发送完整五行
+  `upserts`；旧有新无的比赛只发送三字段 `{round, home, away}` 撤下标记；未变化的比赛不发送。
+  两个数组都按轮号、主队标识、客队标识升序排列。
+
+`prepare` 供已登记端拉取包；尚无官方赛程或未知订阅端报错。其行为：
+
+- 若该端已有待确认包，直接返回库内冻结的原包（含原始差量与目标修订），即使期间发生了新发布
+  或改范围——同一订阅端至多一个待确认包；
+- 否则以当前官方修订和当前范围计算新端点，与确认视图比较：无变化时返回
+  `status="unchanged"`、`package_id=null`、两个空数组与当前修订号，不建任何待确认行，也不改
+  已确认视图；有变化时生成库内唯一的不透明 `pkg-` 标识，并把包、渲染好的两类数组、目标修订
+  以及完整目标视图（`package_fixtures`）在同一事务内全部持久化后才输出
+  `status="pending"`。
+
+`prepare` 的 stdout 是恰含 `status`、`package_id`、`revision`、`upserts`、`removals` 的
+JSON 对象；`revision` 是该包目标视图所用的官方修订号。
+
+`ack --package ID`：
+
+- 标识匹配该端待确认包：确认视图整体替换为该包冻结的目标视图，删除待确认包及其目标快照，
+  记录最近确认标识，返回 `status="acked"`；
+- 标识等于该端最近一次已确认标识：即使当前另有待确认包，也返回 `status="already_acked"`，
+  待确认包原样保留（重试上一个已确认包永远不会确认新包）；
+- 其他标识（包括另一端的包标识、从未存在的标识）一律报错。未知订阅端同样报错。
+
+## 持久化与可恢复性
+
+包的可恢复性不依赖调用方内存，而依赖落库事实：每个待确认包在 `packages` 中冻结自己的
+`revision`、`upserts`、`removals`，并在 `package_fixtures` 中冻结完整目标视图；旧端点则由
+`confirmed_fixtures` 中最近确认视图承担。因此赛程发布新版与订阅范围改变可以先后或同时发生，
+重取仍返回原包，确认只推进到该包实际交付的视图，新进程从同一 SQLite 文件得出完全相同的
+重取与确认行为。包标识由库内单调序列、订阅端、目标修订与两端视图的规范 JSON 共同散列生成，
+再以主键和每端部分唯一索引兜底唯一性。所有写操作先提交后打印；即便提交后 stdout 投递失败，
+重试同一命令也只会取回已冻结的包或重放 `already_acked`，不会产生重复效果。
+
+## 旧视图与旧输入何时可以清理
+
+- 待确认包未确认前，它的目标快照（`package_fixtures`）和该端当前确认视图都不可删除，否则迟到
+  的确认或重取无法复原；包只在成功 `ack`（或订阅端整体退役）时移除，没有自动过期。
+- 旧修订的 `official_fixtures` 行在仍被任何待确认包引用时不可清理；所有订阅端都不再持有引用
+  该修订的待确认包后，旧修订才成为可归档/删除对象。已确认视图只存当前一份，确认新包即原子
+  替换旧视图，无需手工清理。
+- 订阅端永久退役时，才可连同其范围、确认视图、待确认包与包快照一起删除；本赛季库本身按季
+  独立，赛季结束并完成全部确认后整库归档即可。
+- 输入 JSON（赛季声明、发布报告、范围文件）只在对应命令成功读取后需要保留多久由调用方决定：
+  发布成功后报告内容已完整入库，源文件可立即删除；库内另存每次发布的 `source_sha256` 供
+  溯源，若需要按原始字节对账则应自行归档报告文件。
+
+## 测试
+
+`tests/test_calendar.py`（进程内）与 `tests/test_calendar_cli.py`（独立进程，经
+`python -I` 包装器）覆盖：题目指定的两端同订 V1、待确认期间发布改馆并让一端改订 V2、迟到
+确认旧包后改订方收到同键 upsert、留守方收到撤下、应用差量后本地视图与目标视图逐键相等；
+待确认包跨进程重取稳定；重试旧确认标识不确认新包；跨端标识与未知标识拒绝；无新发布只改范围
+的纯撤下；球队与场馆同时命中不重复、缩范围只撤该撤的行；日期/场馆变化为 upsert 且未变化行
+不发送；被拒绝的发布（不可行修复、未知形状、错误计数、缺场/重复/额外/颠倒/错轮/未知场馆、
+轮日期与场馆冲突、修订号跳号）和被拒绝的确认不影响后续差量；40 队边界、空范围、严格读取器
+限制、路径/符号链接/异构库拒绝以及 `unchanged` 不留下待确认包。`scripts/calendar_demo.sh`
+提供可复现的端到端命令演示。既有四个入口与其全部回归测试保持不变。

@@ -71,6 +71,23 @@ fixture-tickets sync-refunds --db run/tickets.db --source fixtures/standings_ref
 
 自制样例 `fixtures/tickets_catalog.json` 取四队 circle 赛程，前两场容量均 1、单价均 1 分。`tickets_batch_b1.json` 是契约规定的手算联动样例：订单 O 跨两场各买 1 张并给 1 分优惠，最大余数法把优惠分给票 1，净额为 `[0, 1]`；随后退掉票 1（零实付退票仍释放票额），新订单 P 无优惠买回该场。此时两场 active 均 1、available 均 0，全库 `paid=2, refunded=0, retained=2`。`tickets_batch_b2.json` 再退 O 的票 2，全库变为 `refunded=1, retained=1`，仅第二场 available 为 1；之后重试 B1 只返回原冻结回执，不再扣票收款。字段、整数分摊、幂等与并发语义见 [数据契约](docs/contract.md)。
 
+## 下游日历差量同步
+
+`fixture-calendar`（或 `python -m fixture_scheduler.calendar`）在一季一库、与票务库分开的本地 SQLite 文件中，把获准发布的完整赛程按球队或场馆订阅范围差量同步给各自独立的下游日历。每条命令是独立进程，仅用标准库，不连外部服务。五个子命令为 `init`、`publish`、`subscribe`、`prepare`、`ack`：
+
+```sh
+fixture-calendar init      --db run/calendar.db --source run/season.json
+fixture-calendar publish   --db run/calendar.db --revision 1 --source run/revision1.json
+fixture-calendar subscribe --db run/calendar.db --subscriber team-site  --source run/scope-v1.json
+fixture-calendar prepare   --db run/calendar.db --subscriber team-site
+fixture-calendar ack       --db run/calendar.db --subscriber team-site --package pkg-...
+```
+
+`init` 输入恰含 `teams`（2–40 个无重复标识，顺序决定全部 `circle_rounds` 有向比赛）与 `venues`（1–40 个），拒绝覆盖已有文件。`publish` 直接消费现有 `schema_version=1` 信封：接受带 `round_count`/`fixture_count`/`fixtures` 的生成器结果或 `feasible=true` 的修复器结果，拒绝不可行修复、未知形状、错误计数、缺场、重复、额外场次、颠倒主客、错误轮号、未知场馆及轮日期/场馆冲突；修订号从 1 起逐次加 1，拒绝不推进修订号。`subscribe` 输入恰含可空的 `teams`、`venues` 已声明标识数组，任一参赛队或当前场馆命中即入视图，同场只保留一行，改范围不清空确认状态。
+
+差量以最近确认包的目标视图为旧端点（首次确认前为空，绝不用当前范围重算旧端点），以当前官方赛程按当前范围筛出的视图为新端点：新有旧无或日期/场馆变化发完整五行 `upserts`，旧有新无只发三字段 `removals`，未变化不发送，两类数组按轮号、主队、客队升序。`prepare` 输出恰含 `status`、`package_id`、`revision`、`upserts`、`removals`；无变化为 `unchanged` 且不留待确认包。同一订阅端至多一个待确认包，发布新版或改范围后重取仍返回冻结原包；`ack` 对正确待确认标识返回 `acked` 并把确认视图推进到该包冻结目标，重发最近已确认标识返回 `already_acked`（即使另有待确认包），其他标识（含另一端标识）报错。包及其确认所需状态先完整持久化再对外输出，跨进程行为完全由 SQLite 状态决定。可复现演示见 `scripts/calendar_demo.sh`，数据契约与旧视图/旧输入清理时机见 [数据契约](docs/contract.md)。
+
+
 输入JSON最多8MB，拒绝重复键、非有限数值和未定义字段；源字节SHA256随结果保留。
 输出是可独立读取的JSON；成功后原子替换，输入/计算失败退出2并保留旧报告。
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。
