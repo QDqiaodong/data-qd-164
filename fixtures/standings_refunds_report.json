@@ -1,0 +1,258 @@
+{
+  "result": {
+    "movements": [
+      {
+        "after_rank": 1,
+        "before_rank": 1,
+        "delta": 0,
+        "team": "A"
+      },
+      {
+        "after_rank": 4,
+        "before_rank": null,
+        "delta": null,
+        "team": "B"
+      },
+      {
+        "after_rank": 2,
+        "before_rank": 2,
+        "delta": 0,
+        "team": "C"
+      },
+      {
+        "after_rank": 3,
+        "before_rank": 3,
+        "delta": 0,
+        "team": "D"
+      }
+    ],
+    "snapshots": [
+      {
+        "cutoff": 6,
+        "match_audit": [
+          {
+            "away": "D",
+            "away_goals": 0,
+            "home": "A",
+            "home_goals": 2,
+            "reason": "counted",
+            "round": 1,
+            "selected_seq": 1
+          },
+          {
+            "away": "B",
+            "away_goals": 1,
+            "home": "C",
+            "home_goals": 1,
+            "reason": "withdrawn",
+            "round": 1,
+            "selected_seq": 2
+          },
+          {
+            "away": "A",
+            "away_goals": null,
+            "home": "C",
+            "home_goals": null,
+            "reason": "void",
+            "round": 2,
+            "selected_seq": 6
+          },
+          {
+            "away": "B",
+            "away_goals": 1,
+            "home": "D",
+            "home_goals": 3,
+            "reason": "withdrawn",
+            "round": 2,
+            "selected_seq": 4
+          },
+          {
+            "away": "B",
+            "away_goals": null,
+            "home": "A",
+            "home_goals": null,
+            "reason": "pending",
+            "round": 3,
+            "selected_seq": null
+          },
+          {
+            "away": "C",
+            "away_goals": null,
+            "home": "D",
+            "home_goals": null,
+            "reason": "pending",
+            "round": 3,
+            "selected_seq": null
+          }
+        ],
+        "standings": [
+          {
+            "deduction": 0,
+            "drawn": 0,
+            "goal_difference": 2,
+            "goals_against": 0,
+            "goals_for": 2,
+            "lost": 0,
+            "played": 1,
+            "points": 3,
+            "rank": 1,
+            "raw_points": 3,
+            "team": "A",
+            "won": 1
+          },
+          {
+            "deduction": 0,
+            "drawn": 0,
+            "goal_difference": 0,
+            "goals_against": 0,
+            "goals_for": 0,
+            "lost": 0,
+            "played": 0,
+            "points": 0,
+            "rank": 2,
+            "raw_points": 0,
+            "team": "C",
+            "won": 0
+          },
+          {
+            "deduction": 0,
+            "drawn": 0,
+            "goal_difference": -2,
+            "goals_against": 2,
+            "goals_for": 0,
+            "lost": 1,
+            "played": 1,
+            "points": 0,
+            "rank": 3,
+            "raw_points": 0,
+            "team": "D",
+            "won": 0
+          }
+        ],
+        "withdrawn": [
+          "B"
+        ]
+      },
+      {
+        "cutoff": 10,
+        "match_audit": [
+          {
+            "away": "D",
+            "away_goals": 0,
+            "home": "A",
+            "home_goals": 2,
+            "reason": "counted",
+            "round": 1,
+            "selected_seq": 1
+          },
+          {
+            "away": "B",
+            "away_goals": 1,
+            "home": "C",
+            "home_goals": 1,
+            "reason": "counted",
+            "round": 1,
+            "selected_seq": 2
+          },
+          {
+            "away": "A",
+            "away_goals": 1,
+            "home": "C",
+            "home_goals": 2,
+            "reason": "counted",
+            "round": 2,
+            "selected_seq": 10
+          },
+          {
+            "away": "B",
+            "away_goals": 1,
+            "home": "D",
+            "home_goals": 3,
+            "reason": "counted",
+            "round": 2,
+            "selected_seq": 4
+          },
+          {
+            "away": "B",
+            "away_goals": 0,
+            "home": "A",
+            "home_goals": 1,
+            "reason": "counted",
+            "round": 3,
+            "selected_seq": 8
+          },
+          {
+            "away": "C",
+            "away_goals": 2,
+            "home": "D",
+            "home_goals": 2,
+            "reason": "counted",
+            "round": 3,
+            "selected_seq": 9
+          }
+        ],
+        "standings": [
+          {
+            "deduction": 0,
+            "drawn": 0,
+            "goal_difference": 2,
+            "goals_against": 2,
+            "goals_for": 4,
+            "lost": 1,
+            "played": 3,
+            "points": 6,
+            "rank": 1,
+            "raw_points": 6,
+            "team": "A",
+            "won": 2
+          },
+          {
+            "deduction": 0,
+            "drawn": 2,
+            "goal_difference": 1,
+            "goals_against": 4,
+            "goals_for": 5,
+            "lost": 0,
+            "played": 3,
+            "points": 5,
+            "rank": 2,
+            "raw_points": 5,
+            "team": "C",
+            "won": 1
+          },
+          {
+            "deduction": 0,
+            "drawn": 1,
+            "goal_difference": 0,
+            "goals_against": 5,
+            "goals_for": 5,
+            "lost": 1,
+            "played": 3,
+            "points": 4,
+            "rank": 3,
+            "raw_points": 4,
+            "team": "D",
+            "won": 1
+          },
+          {
+            "deduction": 0,
+            "drawn": 1,
+            "goal_difference": -3,
+            "goals_against": 5,
+            "goals_for": 2,
+            "lost": 2,
+            "played": 3,
+            "points": 1,
+            "rank": 4,
+            "raw_points": 1,
+            "team": "B",
+            "won": 0
+          }
+        ],
+        "withdrawn": []
+      }
+    ]
+  },
+  "schema_version": 1,
+  "source_sha256": "dad4167b6850612f5482658518bc3ae8049e51b89b702fc0bb71bfb141768924"
+}

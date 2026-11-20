@@ -1,0 +1,17 @@
+{
+  "batch_id": "SYNC-PREREFUND",
+  "operations": [
+    {
+      "kind": "refund",
+      "refund_id": "SYNC-R1",
+      "order_id": "R",
+      "ticket_nos": [1]
+    },
+    {
+      "kind": "refund",
+      "refund_id": "SYNC-R2",
+      "order_id": "O",
+      "ticket_nos": [3]
+    }
+  ]
+}

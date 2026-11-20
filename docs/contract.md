@@ -454,7 +454,158 @@ same write transaction and are independently re-derived by the report queries.
 Because both representations commit or roll back together and the report uses a
 single snapshot, either design alone would produce the same business result.
 
+# Official-result driven refund synchronisation v1
+
+`sync-refunds` is the fourth `fixture-tickets` subcommand
+(`fixture-tickets sync-refunds`, importable as
+`fixture_scheduler.tickets.sync_refunds`). It reconciles the ticket ledger
+against one selected snapshot of a `fixture-standings` report and issues
+refunds for fixtures the official result settles as `void` or `withdrawn`.
+Like the rest of the ledger it uses only the Python standard library, never
+contacts a payment network or external service, and never writes outside the
+named SQLite database and receipt file.
+
+## Invocation and inputs
+
+```
+fixture-tickets sync-refunds --db DB --source STANDINGS_REPORT \
+    --cutoff N --batch-id ID --output RECEIPT
+```
+
+- `--db` must be an existing, compatible `fixture-tickets` ledger (the same
+  application marker and `schema_version=1` checks as `apply`/`report`); the
+  command never creates or migrates the application version.
+- `--source` is read with `common.read`, so the 8 MB limit, duplicate-key and
+  non-finite-number rejections apply. It must be a `fixture-standings`
+  envelope with top-level fields exactly `schema_version`, `source_sha256` and
+  `result`, where `schema_version` is the integer `1` and `result` has exactly
+  `snapshots` and `movements`.
+- `--cutoff N` must be a non-boolean integer and must match the `cutoff` of
+  exactly one snapshot; zero matches or multiple matches are rejected. Each
+  snapshot must have exactly `cutoff`, `standings`, `withdrawn` and
+  `match_audit`.
+- `--batch-id` passes `common.ident`, so it is a non-blank identifier of at
+  most 128 characters with no control characters.
+- The receipt path may not be a symlink and may not equal either the database
+  or the standings source.
+
+## Snapshot fixture identity and reasons
+
+The selected snapshot's `match_audit` rows each have exactly `round`, `home`,
+`away`, `selected_seq`, `reason`, `home_goals` and `away_goals`. Rows must
+carry unique directed `(round, home, away)` keys, and that key set must equal
+the fixture set of `tickets.build_report(DB)` exactly: a missing, extra or
+duplicate directed fixture (including reversed home/away or a wrong round) is
+rejected before any write. The only accepted `reason` values are `pending`,
+`void`, `withdrawn` and `counted`; any other string fails the command.
+
+## Refund eligibility and canonical operations
+
+A ticket qualifies only when all of the following hold:
+
+1. its fixture's audit reason is `void` or `withdrawn`; and
+2. its own `refund_id` is empty (it has never been refunded).
+
+`pending` and `counted` fixtures never trigger a refund. Already-refunded
+tickets are skipped, and a later snapshot that changes a fixture back to
+`counted` never reverses a historical refund or re-charges a ticket. Every
+refund returns the ticket's original frozen `paid_cents`; discount shares are
+never recomputed.
+
+Qualifying tickets are grouped by `order_id` (one refund operation per order)
+with the `ticket_no` values ascending, and the operations are ordered by
+`order_id`, giving a stable canonical request independent of source row order.
+The complete request is rejected as a whole when it contains more than 1000
+refund operations or covers more than 20000 tickets.
+
+## Refund identity
+
+For each order the `refund_id` is
+
+```
+frs- + sha256_hex(
+    batch_id + NUL + standings_report_sha256 + NUL +
+    decimal_cutoff + NUL + order_id + NUL +
+    comma_joined_ascending_ticket_nos
+)
+```
+
+encoded as UTF-8, where `standings_report_sha256` is the SHA-256 of the raw
+standings report bytes. The identifier is `frs-` followed by 64 lowercase
+hexadecimal characters (68 characters total, within the 128-character limit)
+and is bound to the official input, the cutoff and the exact refunded ticket
+identity. These refund ids live in the same permanent namespace as the
+`refund_id` values of manual batches.
+
+## Atomic execution, replay and conflicts
+
+The canonical refund request is executed through the same atomic
+`apply_batch` machinery (`BEGIN IMMEDIATE`, whole-batch simulation then
+commit), so inventory release, money movement, the refund facts and the batch
+identity commit or roll back together. A later competing refund that takes a
+ticket first therefore rejects the entire synchronisation batch without
+partial effects and without consuming the `batch_id`.
+
+- The first synchronisation with a given `batch_id` stores its canonical
+  request. Repeating the same `batch_id`, standings hash, cutoff and canonical
+  request returns the original frozen receipt and never refunds twice.
+- The same `batch_id` with a different standings hash or a different cutoff is
+  rejected as a different canonical request even when the refundable ticket
+  set is identical, because the generated refund ids differ. A different
+  canonical request under a reused `batch_id` is likewise rejected. Regular
+  buy/refund batches and synchronisation batches share the one batch id
+  namespace.
+- When no ticket qualifies, the command succeeds with `status=noop`, zero
+  refunded cents and ticket count and an empty `refunds` array. It does not
+  call `apply_batch`, does not modify the database, does not add the additive
+  sync-receipt column to an older file and does not occupy the `batch_id`; the
+  id remains usable for a later real synchronisation.
+
+The full synchronisation receipt is frozen in the same database transaction
+as the refund facts in an additive nullable `batches.sync_receipt_json`
+column. Fresh ledgers create the column directly; older `schema_version=1`
+ledgers receive it via `ALTER TABLE` only when a write is actually required,
+and older code paths never read it.
+
+## Receipt
+
+The published envelope has exactly `schema_version: 1` and `result`. The
+result has exactly these fields:
+
+- `status`: `synced` for a first successful synchronisation that issued
+  refunds, `noop` when nothing qualified, and the original first-run status on
+  an identical replay;
+- `standings_report_sha256`: the SHA-256 of the raw source bytes;
+- `cutoff`: the selected cutoff;
+- `batch_id`: the caller-supplied identifier;
+- `refunded_ticket_count` and `refunded_cents`: totals across this run's
+  refunds (both zero for a noop);
+- `refunds`: the refund receipts in canonical order, each with exactly `kind`,
+  `refund_id`, `order_id`, ascending `ticket_nos` and `refunded_cents`;
+- `report`: the complete post-execution `fixture-tickets report` envelope.
+
+The receipt is published atomically with `common.save`, so stdout JSON equals
+the file, the output cannot be a symlink and a publication failure preserves
+any previous receipt. Every validation step finishes before the first
+persistence; any validation or ledger failure exits `2` with a stderr message
+and leaves both the database and any existing receipt unchanged.
+
 ## Testing
+
+`tests/test_tickets_sync.py` and `tests/test_tickets_sync_cli.py` cover the
+mandated linked example (a `void` fixture with two unrefunded tickets and one
+already-refunded ticket, a `withdrawn` fixture and a `counted` fixture),
+per-ticket paid amounts and report conservation, the exact NUL-joined refund
+id derivation, identical-batch replay, a later cutoff that reclassifies the
+void fixture as `counted` without reversing or duplicating refunds, the noop
+path, hash/cutoff/canonical-request conflicts, shared batch-id namespaces,
+a competing late refund that rejects without partial modification, invalid
+cutoffs/sources/snapshots/reasons/identifiers, fixture-set mismatches,
+incompatible databases, path and symlink collisions, the 1000-operation and
+20000-ticket limits, legacy-ledger column migration, and unchanged
+`init`/`apply`/`report` behaviour.
+
+# Ticket ledger testing
 
 `tests/test_tickets.py` and `tests/test_tickets_cli.py` cover the
 hand-calculated linked example, a cross-fixture sell-out that rolls the whole

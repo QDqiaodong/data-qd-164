@@ -1,0 +1,32 @@
+{
+  "batch_id": "SYNC-SETUP",
+  "operations": [
+    {
+      "kind": "buy",
+      "order_id": "O",
+      "discount_cents": 0,
+      "lines": [
+        {"round": 1, "home": "C", "away": "B", "quantity": 1},
+        {"round": 2, "home": "C", "away": "A", "quantity": 1},
+        {"round": 2, "home": "D", "away": "B", "quantity": 1}
+      ]
+    },
+    {
+      "kind": "buy",
+      "order_id": "P",
+      "discount_cents": 0,
+      "lines": [
+        {"round": 1, "home": "A", "away": "D", "quantity": 1},
+        {"round": 2, "home": "C", "away": "A", "quantity": 1}
+      ]
+    },
+    {
+      "kind": "buy",
+      "order_id": "R",
+      "discount_cents": 0,
+      "lines": [
+        {"round": 2, "home": "C", "away": "A", "quantity": 1}
+      ]
+    }
+  ]
+}
