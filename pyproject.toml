@@ -13,5 +13,6 @@ fixture-repair = "fixture_scheduler.repair:main"
 fixture-standings = "fixture_scheduler.standings:main"
 fixture-tickets = "fixture_scheduler.tickets:main"
 fixture-calendar = "fixture_scheduler.calendar:main"
+fixture-evidence = "fixture_scheduler.evidence:main"
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -88,6 +88,19 @@ fixture-calendar ack       --db run/calendar.db --subscriber team-site --package
 差量以最近确认包的目标视图为旧端点（首次确认前为空，绝不用当前范围重算旧端点），以当前官方赛程按当前范围筛出的视图为新端点：新有旧无或日期/场馆变化发完整五行 `upserts`，旧有新无只发三字段 `removals`，未变化不发送，两类数组按轮号、主队、客队升序。`prepare` 输出恰含 `status`、`package_id`、`revision`、`upserts`、`removals`；无变化为 `unchanged` 且不留待确认包。同一订阅端至多一个待确认包，发布新版或改范围后重取仍返回冻结原包；`ack` 对正确待确认标识返回 `acked` 并把确认视图推进到该包冻结目标，重发最近已确认标识返回 `already_acked`（即使另有待确认包），其他标识（含另一端标识）报错。包及其确认所需状态先完整持久化再对外输出，跨进程行为完全由 SQLite 状态决定。可复现演示见 `scripts/calendar_demo.sh`，数据契约与旧视图/旧输入清理时机见 [数据契约](docs/contract.md)。
 
 
+## 赛后录像取证包
+
+`fixture-evidence`（或 `python -m fixture_scheduler.evidence`）一次处理一场比赛：读取官方赛程报告、需回看的场馆参考时间窗、至多四台摄录机的未知整数偏差界限与机间校时观测，以及至多十二份录像文件的索引，发布一份只选整份文件的取证清单。程序不打开、复制或拼接录像；`bytes` 只是声明的整文件大小。
+
+```sh
+.venv/bin/fixture-evidence --source fixtures/evidence_hand_example.json --output run/evidence.json
+```
+
+赛程口径与 `fixture-calendar publish` 相同（`schema_version=1` 的生成器或可行修复器报告，完整覆盖有向 circle 比赛，只核发布结构不求排程）；`fixture` 必须精确命中其中一场，其日期与场馆即本次取证归属。每个窗口都必须被清单中某一份文件完整包容，且要对所有同时满足各机界限与全部机间观测的偏差组合成立——不同偏差组合可由不同文件承担，相接文件不能拼接。实现用差分约束闭包判定观测矛盾，再按接受区间端点把各机偏差范围切成矩形单元，只对可行单元做命中判定，因此偏差跨越百万秒也无需逐秒枚举；文件子集全枚举后按 `(总字节, 文件数, ID 升序列表)` 取最优，多窗口共享同一文件只付一次空间。
+
+报告状态为 `inconsistent_clock`、`uncovered`（带 `{window_id, offsets}` 见证）、`over_budget`（带精确 `minimum_bytes`）或 `ready`（带 `minimum_bytes` 与 ID 升序 `file_ids`）；预算恰好等于最优大小时可导出。`fixtures/evidence_hand_example.json` 是手算例：回看 `[10,12)`、两台偏差均在 `[-1,1]` 且要求相等，A 的 4 字节文件与 B 的 5 字节文件缺一不可，最优 9 字节；删去相等约束即出现漏拍。配套的 `evidence_uncovered.json`、`evidence_over_budget.json`、`evidence_shared_window.json`、`evidence_interior_gap.json`、`evidence_inconsistent.json` 分别演示漏拍见证、预算差一字节、共享文件全局最优、端点覆盖而内点漏拍和矛盾观测。可复现演示见 `scripts/evidence_demo.sh`，字段、算法与审计口径见 [数据契约](docs/contract.md)。
+
+
 输入JSON最多8MB，拒绝重复键、非有限数值和未定义字段；源字节SHA256随结果保留。
 输出是可独立读取的JSON；成功后原子替换，输入/计算失败退出2并保留旧报告。
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。

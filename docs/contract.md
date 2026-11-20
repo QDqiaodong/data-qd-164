@@ -745,3 +745,119 @@ JSON 对象；`revision` 是该包目标视图所用的官方修订号。
 轮日期与场馆冲突、修订号跳号）和被拒绝的确认不影响后续差量；40 队边界、空范围、严格读取器
 限制、路径/符号链接/异构库拒绝以及 `unchanged` 不留下待确认包。`scripts/calendar_demo.sh`
 提供可复现的端到端命令演示。既有四个入口与其全部回归测试保持不变。
+
+# 赛后录像取证包 fixture-evidence v1
+
+`fixture-evidence`（或 `python -m fixture_scheduler.evidence`）一次处理一场比赛：读取官方
+赛程报告、需回看的场馆参考时间窗、摄录机及其未知偏差界限、机间校时观测和文件索引，发布一份
+只含清单的报告。程序不打开、复制或拼接任何录像文件；`bytes` 只是调用方声明的整文件大小。
+
+```sh
+fixture-evidence --source INPUT --output REPORT
+python -m fixture_scheduler.evidence --source INPUT --output REPORT
+```
+
+复用 `common.read` / `common.save`：输入上限 8 MB、重复键与非有限数值拒绝、输出原子替换且
+拒绝符号链接、输入输出不得同一文件。业务、输入或 I/O 错误以退出码 2 与 stderr 说明结束，
+验证失败保留既有报告。成功时 stdout 与落盘 JSON 相同；相同输入字节产生相同输出字节。四个状态
+都是有效报告，正常退出 0。
+
+## 输入
+
+顶层恰含 `teams`、`venues`、`schedule`、`fixture`、`windows`、`recorders`、`alignments`、
+`files`、`budget_bytes`，缺失或额外字段都拒绝。
+
+- `teams`（2–40）与 `venues`（1–40）为无重复标识，`teams` 顺序决定 `circle_rounds` 的有向
+  比赛身份。
+- `schedule` 与 `fixture-calendar publish` 接受的口径完全一致：`schema_version=1` 信封，
+  `result` 是生成器形状（`round_count`、`fixture_count`、`fixtures`）或 `feasible=true` 的
+  修复器形状。必须完整覆盖全部有向 circle 比赛，同轮同日、同轮场馆互异、轮间日期互异。
+  这里只核可发布结构，不重新求解排程；调用方负责提供获准使用的那份报告。
+- `fixture` 恰含 `round`、`home`、`away`，必须精确匹配 `schedule` 中的一场有向比赛；该行的
+  `date` 与 `venue` 是本次取证的归属。
+- `windows` 为 1–8 行，每行恰含 `id`、`start`、`end`：场馆参考计时下的半开区间
+  `[start, end)`，整数秒，要求 `start < end`。日期标签不参与换算。
+- `recorders` 为 1–4 行，每行恰含 `id`、`offset_min`、`offset_max`：同一台机器的全部文件
+  共用同一个未知整数偏差（含端点），本批不存在速率漂移。场馆参考秒 = 摄录机本地秒 + 偏差。
+- `alignments` 为 0–32 行，每行恰含 `from`、`to`、`min_delta`、`max_delta`：两端是不同且
+  已声明的摄录机，要求 `offset[to] - offset[from]` 落在闭区间内。同一对机器可有多次观测，
+  全部观测与各机自身界限必须同时成立。
+- `files` 为 0–12 行，每行恰含 `id`、`recorder`、`date`、`venue`、`start`、`end`、`bytes`：
+  录像区间是摄录机本地计时下的半开区间；`recorder` 必须已声明；`date`、`venue` 必须与所选比赛
+  一致，否则整份输入拒绝。`bytes` 为整文件大小，1–10¹²。
+- `budget_bytes` 为 0–10¹³ 的非布尔整数。
+
+偏差与偏差差值字段限于 ±1,000,000，窗口与录像端点限于 ±1,000,000,000。所有整数字段拒绝
+布尔值。标识按 `common.ident`，各集合内 `id` 唯一。`windows`、`recorders`、`alignments`、
+`files` 的输入顺序不影响业务结果；实现按标识规范排序后计算，因此并列取舍与见证选择稳定。
+
+## 覆盖语义
+
+清单只能选整份文件；一份文件被多个窗口使用只付一次空间。对每一个同时满足全部校时约束的整数
+偏差组合，以及每一个窗口，所选清单中都必须有一份文件在换算后完整包含该窗口；不同偏差组合
+可由不同文件承担同一窗口。两份文件即使首尾相接也不能拼成一份证据。带校时约束的偏差组合不能
+拆成逐机独立取值，也不能只检查每台摄录机在窗口两个端点处的覆盖。
+
+窗口 `[s, e)` 由本地 `[fs, fe)` 覆盖，当且仅当 `fs + o <= s` 且 `fe + o >= e`，即
+`e - fe <= o <= s - fs`：对固定窗口，每份文件在自己的摄录机偏差上接受一段闭区间。
+
+## 算法与规模
+
+各机界限与机间观测共同构成整数差分约束系统。其约束矩阵全幺模，故实数可行当且仅当整数可行；
+用一次全源最短路闭包同时判定观测是否矛盾，并对任意偏差子盒检查可行性。偏差可跨越百万秒，
+实现从不逐秒枚举偏差组合。
+
+对每个窗口、每台摄录机，把其偏差范围在全部接受区间端点处切开；各机切分点的笛卡尔积给出
+矩形单元，单元内接受文件集合恒定。无任何文件覆盖且可行非空的矩形就是真实漏拍（含内点，
+不仅是端点），至少一份文件覆盖全部内点的可行矩形则构成必须命中的集合。保证覆盖等价于对这
+些矩形做命中的判定。文件至多 12 份，实现直接枚举全部子集，按
+`(总字节数, 文件数, 按 ID 升序的列表)` 取最小，因而多窗口共享文件带来的全局最优可被正确
+利用，而逐窗独立选择不会。
+
+若存在矛盾观测，状态为 `inconsistent_clock`，绝不能视为覆盖成立。否则若用全部文件仍有
+可行矩形无任何文件覆盖，状态为 `uncovered`，`gap` 给出一个见证：首个按 ID 排序的窗口及
+一组满足全部观测和各机界限、却在该窗口下没有被任何一份文件完整覆盖的偏差。见证的偏差取值由
+差分约束的闭包直接构造，因此相同业务输入稳定返回同一见证。全部素材可覆盖但最小总字节超过
+预算时状态为 `over_budget`，返回精确的 `minimum_bytes`；预算恰好等于最优大小时可以导出。
+
+## 报告
+
+`REPORT` 沿用 `schema_version=1`、`source_sha256`（输入原始字节 SHA-256）与 `result`。
+`result` 恰含 `status`、`fixture`、`minimum_bytes`、`file_ids`、`gap`；`fixture` 是所选
+赛程的完整五字段比赛行。
+
+| status | minimum_bytes | file_ids | gap |
+| --- | --- | --- | --- |
+| `inconsistent_clock` | `null` | `[]` | `null` |
+| `uncovered` | `null` | `[]` | `{window_id, offsets}` |
+| `over_budget` | 精确最优总字节 | `[]` | `null` |
+| `ready` | 最优总字节 | ID 升序非空列表 | `null` |
+
+`gap.offsets` 是每台摄录机标识到偏差的映射。审计规则：只核对清单是否覆盖，不推断录像内容。
+
+## 手算样例
+
+`fixtures/evidence_hand_example.json`：回看 `[10,12)`，A、B 两台偏差均在 `[-1,1]` 且观测
+要求两者相等。A 的文件 `[10,13)` 占 4 字节，B 的文件 `[9,11)` 占 5 字节。A 只有在偏差
+不为 −1 时覆盖，B 只有在偏差不为 1 时覆盖；相等约束下任何合法偏差都至少被其中一份完整覆盖，
+而单独任一份都不够，故最优清单是两份，总大小 9。
+
+`fixtures/evidence_uncovered.json` 删去相等约束后，偏差组合 A=1、B=0 两份文件都不覆盖，
+报告 `uncovered` 并以该组合为见证。`fixtures/evidence_interior_gap.json` 把两台偏差限定为
+`[0,4]` 且相等，两份文件分别只接受偏差 0 和 4：两端点都有人覆盖，中间偏差却漏拍，报告
+`uncovered`，见证取内点 3。`fixtures/evidence_over_budget.json` 把预算改为 8，报告
+`over_budget` 与精确最优 9；预算 9 时为 `ready`。`fixtures/evidence_shared_window.json` 中
+两个窗口各有一份 60 字节的裁剪文件，一份 100 字节的整段文件同时覆盖两窗，最优是后者而非
+120 字节的逐窗组合。`fixtures/evidence_inconsistent.json` 中两台偏差都被钉死为 0，观测却
+要求差在 `[1,2]`，报告 `inconsistent_clock`。
+
+## 测试
+
+`tests/test_evidence.py`（进程内）覆盖手算样例、删去观测后的漏拍、相接文件不能拼接、端点
+覆盖而内点漏拍、机间约束不能拆成独立取值、重复观测的合取、矛盾观测、预算达线与差一字节、
+共享文件的全局最优、字节并列后取文件数更少再取 ID 字典序、错场素材、schedule 结构与
+`publish` 同口径拒绝、字段/整数/布尔/上下界拒绝，并用逐秒枚举的小规模参考实现对 250 组随机
+输入核对状态、最小字节、清单与见证。`tests/test_evidence_cli.py`（独立进程）覆盖入口脚本、
+stdout 与落盘一致、同输入字节可复现、四种状态均退出 0、非法输入退出 2 且保留旧报告、输入输出
+同路径与符号链接拒绝、缺失与超限输入，以及既有入口仍可导入。`scripts/evidence_demo.sh` 提供
+可复现的端到端演示。

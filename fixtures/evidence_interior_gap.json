@@ -1,0 +1,118 @@
+{
+  "teams": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "venues": [
+    "V1",
+    "V2",
+    "V3"
+  ],
+  "schedule": {
+    "schema_version": 1,
+    "source_sha256": "5c50e02e2f255d052830d39e7bb37f04f7d2a56f58afecb131be2c70db3d894f",
+    "result": {
+      "round_count": 3,
+      "fixture_count": 6,
+      "fixtures": [
+        {
+          "round": 1,
+          "home": "A",
+          "away": "D",
+          "date": "d1",
+          "venue": "V1"
+        },
+        {
+          "round": 1,
+          "home": "C",
+          "away": "B",
+          "date": "d1",
+          "venue": "V2"
+        },
+        {
+          "round": 2,
+          "home": "C",
+          "away": "A",
+          "date": "d2",
+          "venue": "V1"
+        },
+        {
+          "round": 2,
+          "home": "D",
+          "away": "B",
+          "date": "d2",
+          "venue": "V3"
+        },
+        {
+          "round": 3,
+          "home": "A",
+          "away": "B",
+          "date": "d3",
+          "venue": "V1"
+        },
+        {
+          "round": 3,
+          "home": "D",
+          "away": "C",
+          "date": "d3",
+          "venue": "V2"
+        }
+      ]
+    }
+  },
+  "fixture": {
+    "round": 1,
+    "home": "A",
+    "away": "D"
+  },
+  "windows": [
+    {
+      "id": "review-1",
+      "start": 10,
+      "end": 12
+    }
+  ],
+  "recorders": [
+    {
+      "id": "cam-a",
+      "offset_min": 0,
+      "offset_max": 4
+    },
+    {
+      "id": "cam-b",
+      "offset_min": 0,
+      "offset_max": 4
+    }
+  ],
+  "alignments": [
+    {
+      "from": "cam-a",
+      "to": "cam-b",
+      "min_delta": 0,
+      "max_delta": 0
+    }
+  ],
+  "files": [
+    {
+      "id": "a-exact",
+      "recorder": "cam-a",
+      "date": "d1",
+      "venue": "V1",
+      "start": 10,
+      "end": 12,
+      "bytes": 2
+    },
+    {
+      "id": "b-late",
+      "recorder": "cam-b",
+      "date": "d1",
+      "venue": "V1",
+      "start": 6,
+      "end": 8,
+      "bytes": 2
+    }
+  ],
+  "budget_bytes": 1000
+}
